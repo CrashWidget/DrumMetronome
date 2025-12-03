@@ -120,28 +120,19 @@ class RudimentWidget(QGroupBox):
         self.lbl_next_sticking = QLabel("")
         
         # Styling
-        f_big = QFont()
-        f_big.setPointSize(30)
-        f_big.setBold(True)
-        self.lbl_current_sticking.setFont(f_big)
+        self.lbl_current_sticking.setStyleSheet("font-size: 30pt; font-weight: bold;")
         self.lbl_current_sticking.setAlignment(Qt.AlignCenter)
         
-        f_med = QFont()
-        f_med.setPointSize(20)
-        f_med.setBold(True)
-        self.lbl_current_name.setFont(f_med)
+        self.lbl_current_name.setStyleSheet("font-size: 20pt; font-weight: bold;")
         self.lbl_current_name.setAlignment(Qt.AlignCenter)
 
-        f_small = QFont()
-        f_small.setPointSize(16)
-        self.lbl_next_name.setFont(f_small)
-        self.lbl_next_sticking.setFont(f_small)
+        # Combined style for next items (font + color)
+        style_next = "font-size: 16pt; color: #999;"
+        self.lbl_next_name.setStyleSheet(style_next)
+        self.lbl_next_sticking.setStyleSheet(style_next)
+
         self.lbl_next_sticking.setAlignment(Qt.AlignCenter)
         self.lbl_next_name.setAlignment(Qt.AlignCenter)
-        
-        # Colors for visual hierarchy
-        self.lbl_next_name.setStyleSheet("color: #999;")
-        self.lbl_next_sticking.setStyleSheet("color: #999;")
 
         self.layout.addWidget(self.lbl_current_name)
         self.layout.addWidget(self.lbl_current_sticking)
