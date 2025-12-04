@@ -108,6 +108,7 @@ QLabel {
 
 class RudimentWidget(QGroupBox):
     selectionChanged = pyqtSignal(list)
+    leadHandChanged = pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__("Rudiment Trainer", parent)
@@ -140,6 +141,17 @@ class RudimentWidget(QGroupBox):
         self.layout.addWidget(self.lbl_next_name)
         self.layout.addWidget(self.lbl_next_sticking)
         
+        self.layout.addSpacing(10)
+
+        # Lead Hand
+        hb_hand = QHBoxLayout()
+        hb_hand.addWidget(QLabel("Lead Hand:"))
+        self.combo_hand = QComboBox()
+        self.combo_hand.addItems(["Right (R)", "Left (L)", "Mixed"])
+        self.combo_hand.currentTextChanged.connect(self._on_lead_hand_changed)
+        hb_hand.addWidget(self.combo_hand)
+        self.layout.addLayout(hb_hand)
+        
         # Selection Toggles
         self.toggles_group = QGroupBox("Included Rudiments")
         self.toggles_group.setCheckable(False)
@@ -147,6 +159,14 @@ class RudimentWidget(QGroupBox):
         self.layout.addWidget(self.toggles_group)
         
         self.checkboxes = {}
+
+    def _on_lead_hand_changed(self, text):
+        val = "R"
+        if "Left" in text:
+            val = "L"
+        elif "Mixed" in text:
+            val = "Mixed"
+        self.leadHandChanged.emit(val)
 
     def set_available_rudiments(self, names):
         # Clear existing
@@ -242,6 +262,7 @@ class MainWindow(QMainWindow):
     sig_rudiment_stop = pyqtSignal()
     sig_rudiment_configure = pyqtSignal(int)
     sig_rudiment_enable_list = pyqtSignal(list)
+    sig_rudiment_lead_hand = pyqtSignal(str)
     sig_init_audio = pyqtSignal()
     sig_init_engine = pyqtSignal()
 
@@ -410,6 +431,7 @@ class MainWindow(QMainWindow):
         self.sig_rudiment_stop.connect(self.rudiment_routine.stop)
         self.sig_rudiment_configure.connect(self.rudiment_routine.set_bars_per_rudiment)
         self.sig_rudiment_enable_list.connect(self.rudiment_routine.set_enabled_rudiments)
+        self.sig_rudiment_lead_hand.connect(self.rudiment_routine.set_lead_hand)
 
         self.sig_init_audio.connect(self.audio.initialize)
         self.sig_init_engine.connect(self.engine.initialize)
@@ -433,6 +455,7 @@ class MainWindow(QMainWindow):
         self.btn_rudiment.clicked.connect(self._toggle_rudiment)
         self.rud_bars.valueChanged.connect(self.sig_rudiment_configure.emit)
         self.rudiment_widget.selectionChanged.connect(self.sig_rudiment_enable_list.emit)
+        self.rudiment_widget.leadHandChanged.connect(self.sig_rudiment_lead_hand.emit)
         self.btn_reset_workout.clicked.connect(self._reset_workout_time)
         self.device_combo.currentTextChanged.connect(self._device_changed)
         self.btn_test.clicked.connect(lambda: self.sig_audio_play.emit(False))

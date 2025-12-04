@@ -36,6 +36,7 @@ class RudimentPracticeRoutine(QObject):
         
         self._current_rudiment = None
         self._next_rudiment = None
+        self._lead_hand = 'R'  # 'R', 'L', 'Mixed'
 
     @property
     def running(self):
@@ -43,6 +44,35 @@ class RudimentPracticeRoutine(QObject):
 
     def get_rudiment_names(self) -> List[str]:
         return [r.name for r in self._library]
+
+    @pyqtSlot(str)
+    def set_lead_hand(self, hand: str):
+        if hand in ['R', 'L', 'Mixed']:
+            self._lead_hand = hand
+
+    def _apply_lead_hand(self, rudiment: Rudiment) -> Rudiment:
+        mode = self._lead_hand
+        
+        invert = False
+        if mode == 'L':
+            invert = True
+        elif mode == 'Mixed':
+            invert = random.choice([True, False])
+        
+        if not invert:
+            return rudiment
+            
+        # Invert sticking
+        original = rudiment.sticking
+        inverted = ""
+        for char in original:
+            if char == 'R': inverted += 'L'
+            elif char == 'L': inverted += 'R'
+            elif char == 'r': inverted += 'l'
+            elif char == 'l': inverted += 'r'
+            else: inverted += char
+            
+        return Rudiment(rudiment.name, inverted)
 
     @pyqtSlot(list)
     def set_enabled_rudiments(self, names: List[str]):
@@ -70,8 +100,8 @@ class RudimentPracticeRoutine(QObject):
         
         # Initial pick
         pool = self._enabled_rudiments if self._enabled_rudiments else self._library
-        self._current_rudiment = random.choice(pool)
-        self._next_rudiment = random.choice(pool)
+        self._current_rudiment = self._apply_lead_hand(random.choice(pool))
+        self._next_rudiment = self._apply_lead_hand(random.choice(pool))
         
         # Connect signals
         try:
@@ -110,6 +140,6 @@ class RudimentPracticeRoutine(QObject):
         # Swap and pick new
         self._current_rudiment = self._next_rudiment
         pool = self._enabled_rudiments if self._enabled_rudiments else self._library
-        self._next_rudiment = random.choice(pool)
+        self._next_rudiment = self._apply_lead_hand(random.choice(pool))
         
         self.rudimentChanged.emit(self._current_rudiment, self._next_rudiment)
