@@ -265,6 +265,7 @@ class MainWindow(QMainWindow):
     sig_rudiment_lead_hand = pyqtSignal(str)
     sig_init_audio = pyqtSignal()
     sig_init_engine = pyqtSignal()
+    sig_update_sounds = pyqtSignal(str, str)
 
     def __init__(self):
         super().__init__()
@@ -344,6 +345,23 @@ class MainWindow(QMainWindow):
         self.btn_test = QPushButton("Test Click")
         audio_row.addWidget(self.btn_test)
         layout.addLayout(audio_row)
+
+        # Sound selection
+        sound_row = QHBoxLayout()
+        sound_row.addWidget(QLabel("Normal Sound:"))
+        self.normal_sound_combo = QComboBox()
+        self.normal_sound_combo.addItems(self.audio.get_available_sounds())
+        sound_row.addWidget(self.normal_sound_combo)
+        
+        sound_row.addSpacing(12)
+        
+        sound_row.addWidget(QLabel("Accent Sound:"))
+        self.accent_sound_combo = QComboBox()
+        self.accent_sound_combo.addItems(self.audio.get_available_sounds())
+        # Set default accent to same as normal initially
+        sound_row.addWidget(self.accent_sound_combo)
+        sound_row.addStretch(1)
+        layout.addLayout(sound_row)
 
         # Session/Workout Clock
         clock_row = QHBoxLayout()
@@ -435,6 +453,7 @@ class MainWindow(QMainWindow):
 
         self.sig_init_audio.connect(self.audio.initialize)
         self.sig_init_engine.connect(self.engine.initialize)
+        self.sig_update_sounds.connect(self.audio.set_sounds)
 
         # -- Feedback (Worker -> UI) --
         self.engine.tick.connect(self._on_tick)
@@ -458,6 +477,8 @@ class MainWindow(QMainWindow):
         self.rudiment_widget.leadHandChanged.connect(self.sig_rudiment_lead_hand.emit)
         self.btn_reset_workout.clicked.connect(self._reset_workout_time)
         self.device_combo.currentTextChanged.connect(self._device_changed)
+        self.normal_sound_combo.currentTextChanged.connect(self._on_sound_settings_changed)
+        self.accent_sound_combo.currentTextChanged.connect(self._on_sound_settings_changed)
         self.btn_test.clicked.connect(lambda: self.sig_audio_play.emit(False))
 
         self.indicator.set_beats(self.beats_spin.value())
@@ -595,6 +616,12 @@ class MainWindow(QMainWindow):
         self.info.setText(f"Device: {name}  •  {fmt}")
         # Trigger test click
         self.sig_audio_play.emit(False)
+
+    def _on_sound_settings_changed(self):
+        self.sig_update_sounds.emit(
+            self.normal_sound_combo.currentText(),
+            self.accent_sound_combo.currentText()
+        )
 
     def _update_info_device_label(self):
         # Initial label update

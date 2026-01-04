@@ -1,6 +1,7 @@
 from PyQt5.QtCore import QObject, QBuffer, pyqtSlot, pyqtSignal
 from PyQt5.QtMultimedia import QAudioFormat, QAudioOutput, QAudioDeviceInfo, QAudio
 import math
+import struct
 
 
 class ClickAudio(QObject):
@@ -18,8 +19,54 @@ class ClickAudio(QObject):
         self.sink = None
         self._normal_data = None
         self._accent_data = None
+        self._normal_sound = "Sine (High)"
+        self._accent_sound = "Sine (High)"
         # Defer initialization to initialize() slot to ensure it runs in the worker thread
+
+    @pyqtSlot(str, str)
+    def set_sounds(self, normal: str, accent: str):
+        """Updates the sound types used for normal and accent clicks."""
+        self._normal_sound = normal
+        self._accent_sound = accent
+        if self.format:
+            self._rebuild_clicks()
+
+    def get_available_sounds(self):
+        return ["Sine (High)", "Sine (Low)", "Triangle", "Woodblock"]
+
+    def _get_sound_params(self, name: str, is_accent: bool):
+        # Base parameters
+        params = {"freq": 2200.0, "ms": 12, "vol": 0.6, "wave": "sine"}
+        if is_accent:
+            params["freq"] = 2800.0
+            params["ms"] = 16
+            params["vol"] = 0.9
+
+        if name == "Sine (Low)":
+            params["freq"] = 880.0 if not is_accent else 1100.0
+            params["ms"] = 20
+        elif name == "Triangle":
+            params["freq"] = 1200.0 if not is_accent else 1600.0
+            params["wave"] = "triangle"
+            params["ms"] = 15
+        elif name == "Woodblock":
+            params["freq"] = 500.0 if not is_accent else 750.0
+            params["ms"] = 40
+            params["vol"] = 0.8 if not is_accent else 1.0
         
+        return params
+
+    def _rebuild_clicks(self):
+        p_norm = self._get_sound_params(self._normal_sound, False)
+        p_acc = self._get_sound_params(self._accent_sound, True)
+        
+        self._normal_data = self._make_click(
+            freq=p_norm["freq"], ms=p_norm["ms"], volume=p_norm["vol"], waveform=p_norm["wave"]
+        )
+        self._accent_data = self._make_click(
+            freq=p_acc["freq"], ms=p_acc["ms"], volume=p_acc["vol"], waveform=p_acc["wave"]
+        )
+
     @pyqtSlot()
     def initialize(self):
         """Initializes the audio output in the correct thread."""
@@ -93,13 +140,12 @@ class ClickAudio(QObject):
             pass
 
         # Rebuild click data
-        self._normal_data = self._make_click(freq=2200.0, ms=12, volume=0.6)
-        self._accent_data = self._make_click(freq=2800.0, ms=16, volume=0.9)
+        self._rebuild_clicks()
 
         # Start in Push mode (streaming)
         self.sink = self.output.start()
 
-    def _make_click(self, freq: float, ms: int, volume: float) -> bytes:
+    def _make_click(self, freq: float, ms: int, volume: float, waveform: str = 'sine') -> bytes:
         sr = int(self.format.sampleRate())
         channels = int(self.format.channelCount())
         n_samples = int(sr * (ms / 1000.0))
@@ -113,7 +159,6 @@ class ClickAudio(QObject):
             vf = max(-1.0, min(1.0, value_float))
             for ch in range(channels):
                 if samp_type == QAudioFormat.Float and samp_size == 32:
-                    import struct
                     b = struct.pack('<f' if little else '>f', float(vf))
                     stride = 4
                 else:
@@ -170,7 +215,23 @@ class ClickAudio(QObject):
         for i in range(n_samples):
             t = i / float(sr)
             env = math.exp(-i / tau)
-            sample = math.sin(2 * math.pi * freq * t) * env * volume
+            
+            phase = 2 * math.pi * freq * t
+            if waveform == 'sine':
+                sample = math.sin(phase)
+            elif waveform == 'triangle':
+                # Triangle: (2/pi) * arcsin(sin(2*pi*f*t))
+                # Clamp sin output to avoid domain errors in asin due to float precision
+                s_val = math.sin(phase)
+                if s_val > 1.0: s_val = 1.0
+                elif s_val < -1.0: s_val = -1.0
+                sample = (2.0 / math.pi) * math.asin(s_val)
+            elif waveform == 'square':
+                sample = 1.0 if math.sin(phase) > 0 else -1.0
+            else:
+                sample = math.sin(phase)
+
+            sample *= env * volume
             write_sample(raw, i, sample)
 
         return bytes(raw)
