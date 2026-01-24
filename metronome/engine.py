@@ -15,6 +15,9 @@ class MetronomeEngine(QObject):
         self._subdivision = 1  # per beat
         self._accent_on_one = True
 
+        self._mute_bars_on = 2
+        self._mute_bars_off = 0
+
         # Timer is created in initialize() to ensure thread affinity
         self._timer = None
         self._running = False
@@ -84,6 +87,22 @@ class MetronomeEngine(QObject):
     def set_accent_on_one(self, on: bool):
         self._accent_on_one = bool(on)
 
+    @property
+    def mute_bars_on(self) -> int:
+        return self._mute_bars_on
+
+    @pyqtSlot(int)
+    def set_mute_bars_on(self, bars: int):
+        self._mute_bars_on = max(1, int(bars))
+
+    @property
+    def mute_bars_off(self) -> int:
+        return self._mute_bars_off
+
+    @pyqtSlot(int)
+    def set_mute_bars_off(self, bars: int):
+        self._mute_bars_off = max(0, int(bars))
+
     def is_running(self) -> bool:
         return self._running
 
@@ -138,7 +157,15 @@ class MetronomeEngine(QObject):
 
             # Emit click signal for audio handling (decoupled from UI)
             if is_beat or self._subdivision > 1:
-                self.click.emit(is_accent)
+                # Check for mute training (Gap Click)
+                is_muted = False
+                if self._mute_bars_off > 0:
+                    cycle = self._mute_bars_on + self._mute_bars_off
+                    if (self._bar_index % cycle) >= self._mute_bars_on:
+                        is_muted = True
+                
+                if not is_muted:
+                    self.click.emit(is_accent)
 
             # Advance counters AFTER emitting
             if is_beat:
