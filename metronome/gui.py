@@ -854,6 +854,8 @@ class MainWindow(QMainWindow):
             groove = self.groove_library.get_groove_by_name(name)
             if groove:
                 self.drum_staff.set_groove(groove)
+                # Force immediate repaint
+                self.drum_staff.repaint()
 
     def _edit_groove(self):
         dialog = GrooveEditorDialog(self.groove_library, self)
