@@ -574,12 +574,13 @@ class MainWindow(QMainWindow):
     sig_groove_stop = pyqtSignal()
     sig_groove_set = pyqtSignal(str)
     sig_groove_loop = pyqtSignal(int)
-    sig_groove_midi = pyqtSignal(list)
+    sig_groove_midi = pyqtSignal(list, int)
     sig_init_audio = pyqtSignal()
     sig_init_engine = pyqtSignal()
     sig_update_sounds = pyqtSignal(str, str)
     sig_click_volume = pyqtSignal(float)
     sig_midi_init = pyqtSignal()
+    sig_midi_shutdown = pyqtSignal()
     sig_midi_set_port = pyqtSignal(str)
     sig_midi_set_voice = pyqtSignal(str, int, int)
     sig_remote_start = pyqtSignal()
@@ -1124,6 +1125,7 @@ class MainWindow(QMainWindow):
         self.groove_loop_spin.setSuffix(" times (0=inf)")
         self.groove_loop_spin.setMinimumWidth(220)
         self.chk_groove_midi = QCheckBox("Groove Audio")
+        self.chk_groove_simple = QCheckBox("Low CPU Audio")
 
         self.lbl_groove_current = QLabel(self.groove_combo.currentText() or "None")
 
@@ -1144,6 +1146,7 @@ class MainWindow(QMainWindow):
         groove_options_row.addWidget(self.groove_loop_spin)
         groove_options_row.addSpacing(10)
         groove_options_row.addWidget(self.chk_groove_midi)
+        groove_options_row.addWidget(self.chk_groove_simple)
         groove_options_row.addStretch(1)
         groove_layout.addLayout(groove_options_row)
 
@@ -1270,6 +1273,7 @@ class MainWindow(QMainWindow):
         self.sig_update_sounds.connect(self.audio.set_sounds)
         self.sig_click_volume.connect(self.audio.set_volume)
         self.sig_midi_init.connect(self.midi_out.initialize)
+        self.sig_midi_shutdown.connect(self.midi_out.shutdown_process)
         self.sig_midi_set_port.connect(self.midi_out.set_output_port_by_name)
         self.sig_midi_set_voice.connect(self.midi_out.set_voice_mapping)
         self.sig_groove_midi.connect(self.midi_out.play_notes)
@@ -1335,6 +1339,7 @@ class MainWindow(QMainWindow):
         self.groove_combo.currentTextChanged.connect(self._update_groove_label)
         self.groove_loop_spin.valueChanged.connect(self.sig_groove_loop.emit)
         self.chk_groove_midi.toggled.connect(self.groove_audio.set_enabled)
+        self.chk_groove_simple.toggled.connect(self.groove_audio.set_simplified)
         self.chk_groove_midi.setChecked(True)
         self.chk_midi_out.toggled.connect(self.midi_out.set_enabled)
         self.chk_toggle_groove_silence.toggled.connect(self._on_toggle_groove_silence)
@@ -2633,12 +2638,20 @@ class MainWindow(QMainWindow):
             return
         self.sig_audio_play.emit(accent)
 
+    def _compute_midi_note_length_ms(self) -> int:
+        bpm = max(1, int(self._current_bpm or 1))
+        subdiv = max(1, int(self.subdiv_spin.value()))
+        step_ms = 60000.0 / (bpm * subdiv)
+        length_ms = int(round(step_ms * 0.6))
+        return max(10, min(60, length_ms))
+
     def _on_groove_notes(self, notes):
         if not notes:
             return
         if not self._allow_groove_midi_output():
             return
-        self.sig_groove_midi.emit(notes)
+        note_length_ms = self._compute_midi_note_length_ms()
+        self.sig_groove_midi.emit(notes, note_length_ms)
 
     def _on_tick(self, step_idx: int, beat_idx: int, is_beat: bool, is_accent: bool):
         # Audio is handled by worker thread now.
@@ -3342,6 +3355,9 @@ class MainWindow(QMainWindow):
         self.chk_groove_midi.setChecked(
             self._coerce_bool(settings.value("groove/audio_enabled"), self.chk_groove_midi.isChecked())
         )
+        self.chk_groove_simple.setChecked(
+            self._coerce_bool(settings.value("groove/audio_simple"), self.chk_groove_simple.isChecked())
+        )
         self.chk_toggle_groove_silence.setChecked(
             self._coerce_bool(
                 settings.value("groove/toggle_silence"),
@@ -3581,6 +3597,7 @@ class MainWindow(QMainWindow):
             settings.setValue("groove/selected", groove_name)
         settings.setValue("groove/loop_count", self.groove_loop_spin.value())
         settings.setValue("groove/audio_enabled", self.chk_groove_midi.isChecked())
+        settings.setValue("groove/audio_simple", self.chk_groove_simple.isChecked())
         settings.setValue("groove/toggle_silence", self.chk_toggle_groove_silence.isChecked())
         settings.setValue("groove/running", self.groove_routine.running)
         settings.setValue(
@@ -3654,6 +3671,7 @@ class MainWindow(QMainWindow):
         if not hasattr(self, "worker_thread") or self.worker_thread is None:
             return
         try:
+            self.sig_midi_shutdown.emit()
             self.sig_ladder_stop.emit()
             self.sig_rudiment_stop.emit()
             self.sig_groove_stop.emit()

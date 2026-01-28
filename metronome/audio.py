@@ -1,5 +1,6 @@
 from PyQt5.QtCore import QObject, QBuffer, pyqtSlot, pyqtSignal
 from PyQt5.QtMultimedia import QAudioFormat, QAudioOutput, QAudioDeviceInfo, QAudio
+from collections import OrderedDict
 import math
 import struct
 import random
@@ -284,10 +285,23 @@ class GrooveMidiAudio(QObject):
         self._voice_samples = {}
         self._packed_voice_samples = {}
         self._accent_gain = 1.25
+        self._simplified = False
+        self._mix_cache = OrderedDict()
+        self._mix_cache_limit = 64
 
     @pyqtSlot(bool)
     def set_enabled(self, enabled: bool):
         self._enabled = bool(enabled)
+
+    @pyqtSlot(bool)
+    def set_simplified(self, enabled: bool):
+        enabled = bool(enabled)
+        if enabled == self._simplified:
+            return
+        self._simplified = enabled
+        self._mix_cache.clear()
+        if self.format:
+            self._rebuild_samples()
 
     @pyqtSlot()
     def initialize(self):
@@ -351,6 +365,7 @@ class GrooveMidiAudio(QObject):
         if "hihat_closed" in self._voice_samples and "hihat" not in self._voice_samples:
             self._voice_samples["hihat"] = self._voice_samples["hihat_closed"]
         self._rebuild_packed_samples()
+        self._mix_cache.clear()
 
     def _apply_gain(self, samples, gain: float):
         if gain == 1.0:
@@ -381,6 +396,109 @@ class GrooveMidiAudio(QObject):
                 }
 
     def _voice_params(self):
+        if self._simplified:
+            return {
+                "kick": {
+                    "freq": 120.0,
+                    "freq_end": 70.0,
+                    "ms": 60,
+                    "volume": 0.85,
+                    "decay_ms": 80,
+                    "wave": "sine",
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+                "snare": {
+                    "freq": 0.0,
+                    "freq_end": None,
+                    "ms": 60,
+                    "volume": 0.6,
+                    "decay_ms": 70,
+                    "wave": "noise",
+                    "noise_hp": 0.18,
+                    "noise_lp": 0.35,
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+                "hihat_closed": {
+                    "freq": 0.0,
+                    "freq_end": None,
+                    "ms": 25,
+                    "volume": 0.22,
+                    "decay_ms": 30,
+                    "wave": "noise",
+                    "noise_hp": 0.3,
+                    "noise_lp": 0.55,
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+                "hihat_open": {
+                    "freq": 0.0,
+                    "freq_end": None,
+                    "ms": 80,
+                    "volume": 0.24,
+                    "decay_ms": 110,
+                    "wave": "noise",
+                    "noise_hp": 0.2,
+                    "noise_lp": 0.5,
+                    "attack_ms": 2,
+                    "variants": 1,
+                },
+                "ride": {
+                    "freq": 0.0,
+                    "freq_end": None,
+                    "ms": 120,
+                    "volume": 0.2,
+                    "decay_ms": 140,
+                    "wave": "noise",
+                    "noise_hp": 0.2,
+                    "noise_lp": 0.4,
+                    "attack_ms": 2,
+                    "variants": 1,
+                },
+                "crash": {
+                    "freq": 0.0,
+                    "freq_end": None,
+                    "ms": 160,
+                    "volume": 0.26,
+                    "decay_ms": 190,
+                    "wave": "noise",
+                    "noise_hp": 0.15,
+                    "noise_lp": 0.4,
+                    "attack_ms": 2,
+                    "variants": 1,
+                },
+                "tom1": {
+                    "freq": 240.0,
+                    "freq_end": 160.0,
+                    "ms": 80,
+                    "volume": 0.6,
+                    "decay_ms": 100,
+                    "wave": "sine",
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+                "tom2": {
+                    "freq": 180.0,
+                    "freq_end": 120.0,
+                    "ms": 90,
+                    "volume": 0.6,
+                    "decay_ms": 110,
+                    "wave": "sine",
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+                "tom3": {
+                    "freq": 140.0,
+                    "freq_end": 100.0,
+                    "ms": 100,
+                    "volume": 0.6,
+                    "decay_ms": 120,
+                    "wave": "sine",
+                    "attack_ms": 1,
+                    "variants": 1,
+                },
+            }
         hihat_tone_freqs = [4200.0, 5600.0, 7200.0, 8800.0, 10400.0]
         ride_tone_freqs = [2800.0, 3600.0, 4500.0, 5600.0, 6800.0, 8100.0, 9600.0, 11400.0]
         crash_tone_freqs = [3200.0, 4100.0, 5200.0, 6400.0, 7800.0, 9300.0, 11100.0, 12900.0, 14600.0]
@@ -508,6 +626,20 @@ class GrooveMidiAudio(QObject):
                 "variants": 2,
             },
         }
+
+    def _mix_cache_key(self, notes):
+        if not self._simplified:
+            return None
+        key = []
+        for note in notes:
+            voice = getattr(note, "voice", None)
+            if not voice or voice not in self._voice_samples:
+                continue
+            key.append((voice, bool(getattr(note, "accent", False))))
+        if not key:
+            return None
+        key.sort()
+        return tuple(key)
 
     def _make_voice_sample(
         self,
@@ -771,9 +903,20 @@ class GrooveMidiAudio(QObject):
                         self.sink.write(data)
                         return
 
+        cache_key = self._mix_cache_key(notes)
+        if cache_key is not None:
+            cached = self._mix_cache.get(cache_key)
+            if cached:
+                self.sink.write(cached)
+                return
+
         mixed = self._mix_notes(notes)
         if not mixed:
             return
 
         data = self._pack_samples(mixed)
+        if cache_key is not None:
+            self._mix_cache[cache_key] = data
+            if len(self._mix_cache) > self._mix_cache_limit:
+                self._mix_cache.popitem(last=False)
         self.sink.write(data)
