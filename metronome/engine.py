@@ -12,7 +12,8 @@ class MetronomeEngine(QObject):
         super().__init__(parent)
         self._bpm = 100
         self._beats_per_bar = 4
-        self._subdivision = 1  # per beat
+        self._subdivision = 1  # per beat (transport/visual)
+        self._click_subdivision = 1  # per beat (audio clicks)
         self._accent_on_one = True
 
         self._mute_bars_on = 2
@@ -25,6 +26,7 @@ class MetronomeEngine(QObject):
         self._step_index = 0
         self._beat_index = 0
         self._bar_index = 0
+        self._last_click_index = -1
 
         # High-resolution scheduling
         self._clock = QElapsedTimer()
@@ -76,8 +78,24 @@ class MetronomeEngine(QObject):
         subdiv = max(1, min(12, int(subdiv)))
         if subdiv != self._subdivision:
             self._subdivision = subdiv
+            if self._click_subdivision > self._subdivision:
+                self._click_subdivision = self._subdivision
+                self._last_click_index = -1
             self._recompute_interval()
             self._reset_counters()
+
+    @property
+    def click_subdivision(self) -> int:
+        return self._click_subdivision
+
+    @pyqtSlot(int)
+    def set_click_subdivision(self, subdiv: int):
+        subdiv = max(1, min(12, int(subdiv)))
+        if subdiv > self._subdivision:
+            subdiv = self._subdivision
+        if subdiv != self._click_subdivision:
+            self._click_subdivision = subdiv
+            self._last_click_index = -1
 
     @property
     def accent_on_one(self) -> bool:
@@ -128,6 +146,7 @@ class MetronomeEngine(QObject):
         self._step_index = 0
         self._beat_index = 0
         self._bar_index = 0
+        self._last_click_index = -1
 
     def _recompute_interval(self):
         # Interval per subdivision step in ms
@@ -146,8 +165,10 @@ class MetronomeEngine(QObject):
         try:
             if not self._running:
                 return
-            steps_per_bar = self._beats_per_bar * self._subdivision
-            is_beat = (self._step_index % self._subdivision) == 0
+            transport_subdiv = max(1, self._subdivision)
+            steps_per_bar = self._beats_per_bar * transport_subdiv
+            step_in_beat = self._step_index % transport_subdiv
+            is_beat = step_in_beat == 0
             # Accent decision based on current beat BEFORE incrementing
             current_beat = self._beat_index
             is_first_beat = is_beat and current_beat == 0
@@ -156,7 +177,13 @@ class MetronomeEngine(QObject):
             self.tick.emit(self._step_index, current_beat, is_beat, is_accent)
 
             # Emit click signal for audio handling (decoupled from UI)
-            if is_beat or self._subdivision > 1:
+            click_subdiv = min(max(1, self._click_subdivision), transport_subdiv)
+            if step_in_beat == 0:
+                self._last_click_index = -1
+            click_index = (step_in_beat * click_subdiv) // transport_subdiv
+            should_click = click_index != self._last_click_index
+            if should_click:
+                self._last_click_index = click_index
                 # Check for mute training (Gap Click)
                 is_muted = False
                 if self._mute_bars_off > 0:
